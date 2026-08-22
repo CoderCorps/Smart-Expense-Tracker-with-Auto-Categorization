@@ -1,0 +1,7 @@
+transaction_id,date,description,transaction_type,amount,balance
+T001,2026-08-21,Swiggy,Spend,300,49700
+T002,2026-08-21,Uber,Spend,250,49450
+T003,2026-08-21,Amazon Shopping,Spend,1200,48250
+T004,2026-08-21,Monthly Salary,Earn,30000,78250
+T005,2026-08-21,House Rent,Spend,15000,63250
+T006,2026-08-21,Electricity Bill,Spend,2500,60750

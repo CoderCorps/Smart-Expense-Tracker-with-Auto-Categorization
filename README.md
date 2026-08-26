@@ -1,1 +1,0 @@
-# Smart-Expense-Tracker-with-Auto-Categorization

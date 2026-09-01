@@ -44,4 +44,7 @@ def _seed_default_categories():
 def root():
     return {"status": "ok", "message": f"{settings.PROJECT_NAME} is running"}
 
-# Test Changes
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=8000)

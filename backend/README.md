@@ -7,20 +7,33 @@ it locally.
 ## Setup
 
 ```bash
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
+uv sync              # from backend/ — creates .venv, installs from uv.lock
 cp .env.example .env
 ```
 
+(`pip install -r requirements.txt` into a manually-created venv still works
+too — `requirements.txt` and `pyproject.toml` are kept in sync.)
+
 ## Run
 
+The app's own imports use the `backend.app...` package path, so uvicorn needs
+the repo root on `sys.path`. From `backend/`, that's handled for you by the
+`poe` tasks (`pyproject.toml`'s `[tool.poe.tasks]`, via `--app-dir ..`):
+
 ```bash
-uvicorn app.main:app --reload
+uv run poe dev      # dev server with --reload, http://localhost:8000
+uv run poe start    # production, no reload
 ```
 
-The API is now at `http://localhost:8000`. Interactive docs (auto-generated
-from the code, always up to date) are at `http://localhost:8000/docs`.
+Equivalent commands run from the repo root instead (no `poe`, no `cd`):
+
+```bash
+uv run --project backend uvicorn backend.app.main:app --reload   # dev
+uv run --project backend python -m backend.app.main              # production
+```
+
+Either way, interactive docs (auto-generated from the code, always up to
+date) are at `http://localhost:8000/docs`.
 
 ## Project structure
 

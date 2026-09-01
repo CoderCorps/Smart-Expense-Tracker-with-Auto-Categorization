@@ -1,5 +1,10 @@
+*.db
+
 venv/
 __pycache__/
 *.pyc
 *.db
 .env
+.venv/
+CLAUDE.md
+.claude/

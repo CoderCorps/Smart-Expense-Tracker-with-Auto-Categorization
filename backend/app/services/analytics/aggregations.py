@@ -12,8 +12,7 @@ import pandas as pd
 from typing import List, Dict, Any, Optional
 from dateutil.relativedelta import relativedelta
 
-from app.models.transaction import Transaction, TransactionType
-
+from backend.app.models.transaction import Transaction, TransactionType
 
 def _transactions_to_df(transactions: List[Transaction]) -> pd.DataFrame:
     """

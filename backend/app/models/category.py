@@ -1,7 +1,7 @@
 from sqlalchemy import Boolean, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from backend.app.db.database import Base
+from app.db.database import Base
 
 # Seeded into the DB on startup (see app/main.py). Person A and Person B
 # both read from this list — A suggests one of these when mapping a CSV/PDF

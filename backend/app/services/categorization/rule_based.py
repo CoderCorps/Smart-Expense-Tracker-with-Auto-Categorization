@@ -1,37 +1,132 @@
 """
-PERSON B OWNS THIS FILE (along with ml_classifier.py).
+Person B - Rule Based Transaction Categorization
 
-Keyword-based categorization. This is the fallback that always runs first —
-every transaction gets a category the moment it's saved, using this. Once
-ml_classifier.py is trained (see that file), the categorization pipeline in
-upload.py can be switched to try ML first and fall back to this when the ML
-model isn't confident.
+Baseline categorization system for transaction descriptions.
 
-This works fine as a baseline but the keyword list below is intentionally
-small. Expanding it against real transaction descriptions is the actual
-Week 2 task here — test it against messy real-world text ("SWIGGY*ORDER
-99213", "NEFT-HDFC0001-SALARY", "AMZN Mktp IN") not just clean sample data.
+The goal is to handle both clean descriptions and messy bank
+narrations such as:
+
+    SWIGGY*ORDER 99213
+    UPI-SWIGGY-12345
+    AMZN Mktp IN
+    NEFT-HDFC0001-SALARY
+    UBER INDIA
+    NETFLIX.COM
+
+This remains the fallback categorizer even after the ML model
+is introduced.
 """
 
-# category_name -> keywords that, if found (case-insensitive) in the
-# description, mean this category. First match wins, so put more specific
-# keywords before generic ones if you add to this.
-CATEGORY_KEYWORDS: dict[str, list[str]] = {
-    "Food & Dining": ["swiggy", "zomato", "restaurant", "cafe", "food"],
-    "Travel & Transport": ["uber", "ola", "irctc", "flight", "fuel", "petrol"],
-    "Shopping": ["amazon", "flipkart", "myntra", "mall"],
-    "Rent & Housing": ["rent", "landlord"],
-    "Utilities": ["electricity", "water bill", "broadband", "recharge", "gas bill"],
-    "Entertainment": ["netflix", "spotify", "prime video", "hotstar", "movie"],
-    "Health & Fitness": ["pharmacy", "hospital", "gym", "doctor"],
-    "Salary & Income": ["salary", "payroll", "stipend"],
+import re
+
+
+# More specific categories/keywords should appear before generic ones.
+CATEGORY_KEYWORDS = {
+    "Food & Dining": [
+        "swiggy",
+        "zomato",
+        "restaurant",
+        "cafe",
+        "food",
+        "dominos",
+        "pizza",
+        "mcdonald",
+        "kfc",
+    ],
+
+    "Travel & Transport": [
+        "uber",
+        "ola",
+        "irctc",
+        "flight",
+        "fuel",
+        "petrol",
+        "diesel",
+        "metro",
+        "rapido",
+        "cab",
+        "bus",
+    ],
+
+    "Shopping": [
+        "amazon",
+        "amzn",
+        "flipkart",
+        "myntra",
+        "mall",
+        "ajio",
+        "meesho",
+    ],
+
+    "Rent & Housing": [
+        "rent",
+        "landlord",
+        "housing",
+    ],
+
+    "Utilities": [
+        "electricity",
+        "water bill",
+        "broadband",
+        "recharge",
+        "gas bill",
+        "mobile bill",
+        "internet",
+    ],
+
+    "Entertainment": [
+        "netflix",
+        "spotify",
+        "prime video",
+        "hotstar",
+        "movie",
+        "cinema",
+        "bookmyshow",
+    ],
+
+    "Health & Fitness": [
+        "pharmacy",
+        "hospital",
+        "gym",
+        "doctor",
+        "medical",
+        "apollo",
+    ],
+
+    "Salary & Income": [
+        "salary",
+        "payroll",
+        "stipend",
+        "income",
+        "salary credit",
+    ],
 }
+
 
 DEFAULT_CATEGORY = "Others"
 
 
+def _normalize_description(description: str) -> str:
+    """
+    Normalize bank narration so keyword matching works with
+    different punctuation, spacing and casing.
+    """
+
+    if not description:
+        return ""
+
+    text = str(description).lower().strip()
+
+    # Replace punctuation/separators with spaces.
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+
+    # Collapse repeated whitespace.
+    text = re.sub(r"\s+", " ", text).strip()
+
+    return text
+
+
 def categorize(description: str) -> str:
-    """Returns a category name (always succeeds — falls back to 'Others')."""
     text = description.lower()
 
     for category, keywords in CATEGORY_KEYWORDS.items():

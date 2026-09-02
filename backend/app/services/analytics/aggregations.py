@@ -12,7 +12,7 @@ endpoint can drop straight into its response schema. Keeping DB fetching
 out of these functions makes them easy to unit test with fake data.
 """
 
-from backend.app.models.transaction import Transaction
+from app.models.transaction import Transaction
 
 
 def get_monthly_summary(transactions: list[Transaction], month: str) -> dict:

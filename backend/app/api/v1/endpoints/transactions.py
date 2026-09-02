@@ -11,11 +11,11 @@ from datetime import date as date_type
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from backend.app.api.deps import get_current_user, get_db
-from backend.app.models.category import Category
-from backend.app.models.transaction import CategorySource, Transaction, TransactionType
-from backend.app.models.user import User
-from backend.app.schemas.transaction import TransactionCategoryUpdate, TransactionCreate, TransactionOut
+from app.api.deps import get_current_user, get_db
+from app.models.category import Category
+from app.models.transaction import CategorySource, Transaction, TransactionType
+from app.models.user import User
+from app.schemas.transaction import TransactionCategoryUpdate, TransactionCreate, TransactionOut
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -71,7 +71,7 @@ def create_transaction(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    from backend.app.models.transaction import TransactionSource
+    from app.models.transaction import TransactionSource
 
     transaction = Transaction(
         user_id=current_user.id,

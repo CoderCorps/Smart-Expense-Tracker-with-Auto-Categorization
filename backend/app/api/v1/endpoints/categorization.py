@@ -8,11 +8,11 @@ without spinning up the API.
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from backend.app.api.deps import get_current_user, get_db
-from backend.app.models.category import Category
-from backend.app.models.transaction import CategorySource, Transaction
-from backend.app.models.user import User
-from backend.app.services.categorization.rule_based import categorize
+from app.api.deps import get_current_user, get_db
+from app.models.category import Category
+from app.models.transaction import CategorySource, Transaction
+from app.models.user import User
+from app.services.categorization.rule_based import categorize
 
 router = APIRouter(prefix="/categorization", tags=["categorization"])
 

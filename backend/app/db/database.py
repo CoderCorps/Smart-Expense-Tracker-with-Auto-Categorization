@@ -7,7 +7,7 @@ in app/models/ imports `Base` from here.
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
-from backend.app.core.config import settings
+from app.core.config import settings
 
 connect_args = {"check_same_thread": False} if "sqlite" in settings.DATABASE_URL else {}
 

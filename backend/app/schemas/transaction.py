@@ -2,7 +2,7 @@ from datetime import date as date_type
 
 from pydantic import BaseModel
 
-from backend.app.models.transaction import CategorySource, TransactionSource, TransactionType
+from app.models.transaction import CategorySource, TransactionSource, TransactionType
 
 
 class TransactionOut(BaseModel):

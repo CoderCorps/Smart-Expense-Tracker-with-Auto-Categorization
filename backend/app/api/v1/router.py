@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
-from backend.app.api.v1.endpoints import upload
-from backend.app.api.v1.endpoints import auth, categorization, dashboard, transactions
+from app.api.v1.endpoints import upload
+from app.api.v1.endpoints import auth, categorization, dashboard, transactions
 
 api_router = APIRouter()
 

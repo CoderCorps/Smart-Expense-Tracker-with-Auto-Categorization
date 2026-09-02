@@ -9,11 +9,11 @@ from datetime import date
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from backend.app.api.deps import get_current_user, get_db
-from backend.app.models.transaction import Transaction
-from backend.app.models.user import User
-from backend.app.schemas.dashboard import CategoryBreakdownItem, DashboardSummary, InsightAlert, TrendPoint
-from backend.app.services.analytics.aggregations import (
+from app.api.deps import get_current_user, get_db
+from app.models.transaction import Transaction
+from app.models.user import User
+from app.schemas.dashboard import CategoryBreakdownItem, DashboardSummary, InsightAlert, TrendPoint
+from app.services.analytics.aggregations import (
     detect_spikes,
     get_category_breakdown,
     get_monthly_summary,

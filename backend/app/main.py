@@ -1,10 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.app.api.v1.router import api_router
-from backend.app.core.config import settings
-from backend.app.db.database import Base, SessionLocal, engine
-from backend.app.models.category import DEFAULT_CATEGORIES, Category
+from app.api.v1.router import api_router
+from app.core.config import settings
+from app.db.database import Base, SessionLocal, engine
+from app.models.category import DEFAULT_CATEGORIES, Category
 
 app = FastAPI(title=settings.PROJECT_NAME)
 
@@ -43,8 +43,3 @@ def _seed_default_categories():
 @app.get("/")
 def root():
     return {"status": "ok", "message": f"{settings.PROJECT_NAME} is running"}
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=8000)

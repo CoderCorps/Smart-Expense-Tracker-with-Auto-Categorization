@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 from sqlalchemy import Date, DateTime, Enum, Float, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from backend.app.db.database import Base
+from app.db.database import Base
 
 
 class TransactionType(str, enum.Enum):

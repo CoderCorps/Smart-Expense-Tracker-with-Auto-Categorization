@@ -4,6 +4,7 @@ from sqlalchemy import DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+from app.models.transaction import Transaction
 
 
 class User(Base):
@@ -17,4 +18,4 @@ class User(Base):
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
 
-    transactions = relationship("Transaction", back_populates="owner", cascade="all, delete-orphan")
+    transactions = relationship(Transaction, back_populates="owner", cascade="all, delete-orphan")

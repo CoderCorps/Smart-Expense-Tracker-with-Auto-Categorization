@@ -25,26 +25,26 @@ import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
-from backend.app.api.deps import get_current_user, get_db
-from backend.app.models.category import Category
-from backend.app.models.transaction import CategorySource, Transaction, TransactionSource, TransactionType
-from backend.app.models.user import User
-from backend.app.schemas.upload import (
+from app.api.deps import get_current_user, get_db
+from app.models.category import Category
+from app.models.transaction import CategorySource, Transaction, TransactionSource, TransactionType
+from app.models.user import User
+from app.schemas.upload import (
     STANDARD_FIELDS,
     ColumnMappingConfirm,
     ColumnMappingSuggestion,
     UploadResult,
 )
-from backend.app.services.categorization.rule_based import categorize
-from backend.app.services.parsers.column_mapper import suggest_mapping
-from backend.app.services.parsers.csv_parser import parse_csv
-from backend.app.services.parsers.pdf_parser import parse_pdf
+from app.services.categorization.categorizer import categorize_transaction
+from app.services.parsers.column_mapper import suggest_mapping
+from app.services.parsers.csv_parser import parse_csv
+from app.services.parsers.pdf_parser import parse_pdf
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 
 # upload_id -> (DataFrame, original filename). See note in the module
 # docstring above on why this is in-memory.
-_preview_store: dict[str, pd.DataFrame] = {}
+_preview_store: dict[str, tuple[pd.DataFrame, str]] = {}
 
 
 @router.post("/preview", response_model=ColumnMappingSuggestion)
@@ -69,7 +69,10 @@ async def preview_upload(
         raise HTTPException(status_code=400, detail="Only .csv and .pdf files are supported")
 
     upload_id = str(uuid.uuid4())
-    _preview_store[upload_id] = df
+    _preview_store[upload_id] = (
+        df,
+        file.filename.lower()
+    )
 
     mapping = suggest_mapping(list(df.columns))
     sample_rows = df.head(5).fillna("").to_dict(orient="records")
@@ -83,15 +86,60 @@ async def preview_upload(
     )
 
 
+def normalize_transaction_type(value: str):
+    value = str(value).strip().lower()
+
+    if value in {
+        "earn",
+        "credit",
+        "cr",
+        "deposit",
+        "salary",
+        "refund",
+        "income",
+        "received",
+    }:
+        return TransactionType.EARN
+
+    if value in {
+        "spend",
+        "debit",
+        "dr",
+        "withdrawal",
+        "transfer",
+        "payment",
+        "purchase",
+        "expense",
+        "withdraw",
+    }:
+        return TransactionType.SPEND
+
+    return None
+
 @router.post("/confirm", response_model=UploadResult)
 def confirm_upload(
     payload: ColumnMappingConfirm,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    df = _preview_store.get(payload.upload_id)
-    if df is None:
-        raise HTTPException(status_code=404, detail="Upload not found or already confirmed")
+    stored = _preview_store.get(payload.upload_id)
+
+    if stored is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Upload not found or already confirmed"
+        )
+
+    df, filename = stored
+    print("\n========== CONFIRM DEBUG ==========")
+    print("Upload ID:", payload.upload_id)
+    print("Filename:", filename)
+    print("DataFrame shape:", df.shape)
+    print("DataFrame columns:", list(df.columns))
+    print("DataFrame:")
+    print(df.to_string())
+    print("===================================\n")
+
 
     missing_fields = [f for f in STANDARD_FIELDS if f not in payload.mapping]
     if missing_fields:
@@ -101,35 +149,82 @@ def confirm_upload(
 
     saved_count = 0
     errors: list[str] = []
+    print("========== STARTING ROW LOOP ==========")
+    print("Number of rows:", len(df))
 
     for idx, row in df.iterrows():
+        print("PROCESSING ROW:", idx)
+        print(row.to_dict())
         try:
+            print("STEP 1: entering try")
             raw_description = str(row[payload.mapping["description"]])
-            category_name = categorize(raw_description)
+            print("STEP 2: description =", raw_description)
+            category_name, category_source = categorize_transaction(
+                raw_description
+            )
+            print("STEP 3: category =", category_name, category_source)
 
             type_column = payload.mapping.get("type")
+            print("STEP 4: type_column =", type_column)
+
+            raw_amount_text = (
+                str(row[payload.mapping["amount"]])
+                .replace(",", "")
+                .replace("$", "")
+                .strip()
+            )
+            print("STEP 5: amount =", raw_amount_text)
+            # Skip rows with no usable amount, such as Opening Balance
+            if raw_amount_text in {"", "-"}:
+                continue
+
+            raw_amount = float(raw_amount_text)
+
             if type_column and type_column in df.columns:
-                txn_type = TransactionType(str(row[type_column]).strip().lower())
+                raw_type = str(row[type_column]).strip().lower()
+
+                txn_type = normalize_transaction_type(raw_type)
+
+                # Skip rows such as Opening Balance where type is "-"
+                if txn_type is None:
+                    continue
+
             else:
-                # No type column mapped — TODO (Person B): infer spend vs earn
-                # from amount sign instead of defaulting everyone to SPEND,
-                # for banks that only give a single signed amount column.
-                txn_type = TransactionType.SPEND
+                if raw_amount < 0:
+                    txn_type = TransactionType.SPEND
+                else:
+                    txn_type = TransactionType.EARN
+
+            amount = abs(raw_amount)
 
             transaction = Transaction(
                 user_id=current_user.id,
-                date=pd.to_datetime(row[payload.mapping["date"]]).date(),
+                date=pd.to_datetime(
+                    row[payload.mapping["date"]]
+                ).date(),
                 description=raw_description,
                 raw_description=raw_description,
-                amount=float(row[payload.mapping["amount"]]),
+                amount=amount,
                 type=txn_type,
                 category_id=categories_by_name.get(category_name),
-                category_source=CategorySource.RULE_BASED,
-                source=TransactionSource.CSV,
+                category_source=(
+                    CategorySource.ML
+                    if category_source == "ml"
+                    else CategorySource.RULE_BASED
+                ),
+                source=(
+                    TransactionSource.PDF
+                    if filename.endswith(".pdf")
+                    else TransactionSource.CSV
+                ),
             )
+            print("BEFORE DB ADD")
+            print(transaction)
+
             db.add(transaction)
             saved_count += 1
-        except Exception as exc:  # noqa: BLE001 - we want to keep going on bad rows
+
+        except Exception as exc:
             errors.append(f"Row {idx}: {exc}")
 
     db.commit()

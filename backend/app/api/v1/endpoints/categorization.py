@@ -102,6 +102,12 @@ def train_ml_model(
             detail="Some training transactions have missing categories",
         )
 
+    if len(set(category_names)) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Manual corrections must span at least two different categories to train the model",
+        )
+
     model = MLCategorizer()
     model.train(descriptions, category_names)
 

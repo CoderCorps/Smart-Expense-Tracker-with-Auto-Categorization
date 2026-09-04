@@ -12,9 +12,9 @@ from datetime import datetime
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models.category import Category
-from app.models.transaction import CategorySource, Transaction, TransactionSource, TransactionType
-from app.models.user import User
+from backend.app.models.category import Category
+from backend.app.models.transaction import CategorySource, Transaction, TransactionSource, TransactionType
+from backend.app.models.user import User
 
 
 class TestUserModel:
@@ -39,7 +39,7 @@ class TestUserModel:
 
     def test_user_full_name_optional(self, db: Session):
         """Verify full_name is optional."""
-        from app.core.security import hash_password
+        from backend.app.core.security import hash_password
 
         user = User(
             email="noname@example.com", hashed_password=hash_password("pass")

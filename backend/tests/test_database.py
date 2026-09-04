@@ -10,9 +10,9 @@ These tests verify that:
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models.category import Category, DEFAULT_CATEGORIES
-from app.models.transaction import Transaction
-from app.models.user import User
+from backend.app.models.category import Category, DEFAULT_CATEGORIES
+from backend.app.models.transaction import Transaction
+from backend.app.models.user import User
 
 
 class TestDatabase:
@@ -64,7 +64,7 @@ class TestDatabase:
         from sqlalchemy import text
 
         # Try to insert duplicate email
-        from app.core.security import hash_password
+        from backend.app.core.security import hash_password
 
         duplicate_user = User(
             email=test_user.email,  # Same email
@@ -77,7 +77,7 @@ class TestDatabase:
 
     def test_transaction_table_foreign_keys(self, db: Session):
         """Verify transaction foreign key constraints."""
-        from app.models.transaction import TransactionSource, TransactionType
+        from backend.app.models.transaction import TransactionSource, TransactionType
 
         # Try to create transaction with invalid user_id
         invalid_txn = Transaction(

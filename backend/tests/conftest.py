@@ -9,18 +9,24 @@ This file provides:
 """
 
 import os
+import sys
 from datetime import date
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.db.database import Base, get_db
-from app.main import app
-from app.models.category import Category, DEFAULT_CATEGORIES
-from app.models.transaction import Transaction, TransactionSource, TransactionType
-from app.models.user import User
+# Put the repo root on sys.path so `backend.app...` resolves the same way it
+# does for uvicorn (poe tasks pass --app-dir .. for the same reason).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from backend.app.db.database import Base, get_db
+from backend.app.main import app
+from backend.app.models.category import Category, DEFAULT_CATEGORIES
+from backend.app.models.transaction import Transaction, TransactionSource, TransactionType
+from backend.app.models.user import User
 
 
 # Use in-memory SQLite for testing (very fast, no disk I/O)
@@ -71,7 +77,7 @@ def client(db: Session):
 @pytest.fixture
 def test_user(db: Session) -> User:
     """Create a test user."""
-    from app.core.security import hash_password
+    from backend.app.core.security import hash_password
 
     user = User(
         email="test@example.com",
@@ -87,7 +93,7 @@ def test_user(db: Session) -> User:
 @pytest.fixture
 def test_user_2(db: Session) -> User:
     """Create a second test user (for testing user isolation)."""
-    from app.core.security import hash_password
+    from backend.app.core.security import hash_password
 
     user = User(
         email="user2@example.com",

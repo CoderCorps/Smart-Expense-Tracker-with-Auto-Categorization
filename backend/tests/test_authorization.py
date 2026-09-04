@@ -25,7 +25,7 @@ class TestUserIsolation:
         db,
     ):
         """User A cannot retrieve User B's transaction."""
-        from app.models.transaction import Transaction, TransactionSource, TransactionType
+        from backend.app.models.transaction import Transaction, TransactionSource, TransactionType
         from datetime import date
 
         # User 2 creates a transaction
@@ -58,7 +58,7 @@ class TestUserIsolation:
         db,
     ):
         """User A cannot update User B's transaction."""
-        from app.models.transaction import Transaction, TransactionSource, TransactionType
+        from backend.app.models.transaction import Transaction, TransactionSource, TransactionType
         from datetime import date
 
         # User 2 creates a transaction
@@ -92,7 +92,7 @@ class TestUserIsolation:
         db,
     ):
         """User A cannot delete User B's transaction."""
-        from app.models.transaction import Transaction, TransactionSource, TransactionType
+        from backend.app.models.transaction import Transaction, TransactionSource, TransactionType
         from datetime import date
 
         # User 2 creates a transaction
@@ -125,7 +125,7 @@ class TestUserIsolation:
         db,
     ):
         """User A only sees their own transactions in list."""
-        from app.models.transaction import Transaction, TransactionSource, TransactionType
+        from backend.app.models.transaction import Transaction, TransactionSource, TransactionType
         from datetime import date
 
         # Create transaction for User 1

@@ -25,26 +25,37 @@ import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, get_db
-from app.models.category import Category
-from app.models.transaction import CategorySource, Transaction, TransactionSource, TransactionType
-from app.models.user import User
-from app.schemas.upload import (
+from backend.app.api.deps import get_current_user, get_db
+from backend.app.models.category import Category
+from backend.app.models.transaction import CategorySource, Transaction, TransactionSource, TransactionType
+from backend.app.models.user import User
+from backend.app.schemas.upload import (
     STANDARD_FIELDS,
     ColumnMappingConfirm,
     ColumnMappingSuggestion,
     UploadResult,
 )
-from app.services.categorization.categorizer import categorize_transaction
-from app.services.parsers.column_mapper import suggest_mapping
-from app.services.parsers.csv_parser import parse_csv
-from app.services.parsers.pdf_parser import parse_pdf
+from backend.app.services.categorization.ml_classifier import MLCategorizer
+from backend.app.services.categorization.rule_based import categorize
+from backend.app.services.parsers.column_mapper import suggest_mapping
+from backend.app.services.parsers.csv_parser import parse_csv
+from backend.app.services.parsers.pdf_parser import parse_pdf
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 
 # upload_id -> (DataFrame, original filename). See note in the module
 # docstring above on why this is in-memory.
 _preview_store: dict[str, tuple[pd.DataFrame, str]] = {}
+
+_ml_categorizer = MLCategorizer()
+
+
+def categorize_transaction(description: str) -> tuple[str, str]:
+    """Categorize a description, preferring the ML model when confident."""
+    prediction = _ml_categorizer.predict(description)
+    if prediction:
+        return prediction.category_name, "ml"
+    return categorize(description), "rule_based"
 
 
 @router.post("/preview", response_model=ColumnMappingSuggestion)
@@ -131,15 +142,6 @@ def confirm_upload(
         )
 
     df, filename = stored
-    print("\n========== CONFIRM DEBUG ==========")
-    print("Upload ID:", payload.upload_id)
-    print("Filename:", filename)
-    print("DataFrame shape:", df.shape)
-    print("DataFrame columns:", list(df.columns))
-    print("DataFrame:")
-    print(df.to_string())
-    print("===================================\n")
-
 
     missing_fields = [f for f in STANDARD_FIELDS if f not in payload.mapping]
     if missing_fields:
@@ -148,24 +150,17 @@ def confirm_upload(
     categories_by_name = {c.name: c.id for c in db.query(Category).all()}
 
     saved_count = 0
+    skipped_count = 0
     errors: list[str] = []
-    print("========== STARTING ROW LOOP ==========")
-    print("Number of rows:", len(df))
 
     for idx, row in df.iterrows():
-        print("PROCESSING ROW:", idx)
-        print(row.to_dict())
         try:
-            print("STEP 1: entering try")
             raw_description = str(row[payload.mapping["description"]])
-            print("STEP 2: description =", raw_description)
             category_name, category_source = categorize_transaction(
                 raw_description
             )
-            print("STEP 3: category =", category_name, category_source)
 
             type_column = payload.mapping.get("type")
-            print("STEP 4: type_column =", type_column)
 
             raw_amount_text = (
                 str(row[payload.mapping["amount"]])
@@ -173,9 +168,10 @@ def confirm_upload(
                 .replace("$", "")
                 .strip()
             )
-            print("STEP 5: amount =", raw_amount_text)
             # Skip rows with no usable amount, such as Opening Balance
             if raw_amount_text in {"", "-"}:
+                skipped_count += 1
+                errors.append(f"Row {idx}: no usable amount, skipped")
                 continue
 
             raw_amount = float(raw_amount_text)
@@ -187,6 +183,8 @@ def confirm_upload(
 
                 # Skip rows such as Opening Balance where type is "-"
                 if txn_type is None:
+                    skipped_count += 1
+                    errors.append(f"Row {idx}: unrecognized transaction type '{raw_type}', skipped")
                     continue
 
             else:
@@ -218,16 +216,15 @@ def confirm_upload(
                     else TransactionSource.CSV
                 ),
             )
-            print("BEFORE DB ADD")
-            print(transaction)
 
             db.add(transaction)
             saved_count += 1
 
         except Exception as exc:
+            skipped_count += 1
             errors.append(f"Row {idx}: {exc}")
 
     db.commit()
     del _preview_store[payload.upload_id]
 
-    return UploadResult(saved_count=saved_count, skipped_count=len(errors), errors=errors)
+    return UploadResult(saved_count=saved_count, skipped_count=skipped_count, errors=errors)

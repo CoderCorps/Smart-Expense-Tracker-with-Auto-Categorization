@@ -87,7 +87,7 @@ class TestSignup:
         assert response2.status_code == 201
 
         # Get users from DB to compare hashes
-        from app.models.user import User
+        from backend.app.models.user import User
 
         user1 = db.query(User).filter(User.email == "user1@example.com").first()
         user2 = db.query(User).filter(User.email == "user2@example.com").first()

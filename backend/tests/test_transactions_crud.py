@@ -177,12 +177,12 @@ class TestTransactionRead:
         self, client: TestClient, auth_headers: dict, db, test_user
     ):
         """Test pagination in list transactions."""
-        from app.models.transaction import TransactionSource, TransactionType
+        from backend.app.models.transaction import TransactionSource, TransactionType
         from datetime import date
 
         # Create multiple transactions
         for i in range(5):
-            from app.models.transaction import Transaction
+            from backend.app.models.transaction import Transaction
 
             txn = Transaction(
                 user_id=test_user.id,

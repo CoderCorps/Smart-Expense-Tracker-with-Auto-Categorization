@@ -13,6 +13,7 @@ from backend.app.models.category import Category
 from backend.app.models.transaction import CategorySource, Transaction
 from backend.app.models.user import User
 from backend.app.services.categorization.rule_based import categorize
+from backend.app.services.categorization.ml_classifier import MLCategorizer
 
 router = APIRouter(prefix="/categorization", tags=["categorization"])
 
@@ -42,11 +43,22 @@ def recategorize_transaction(
     if not txn or txn.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Transaction not found")
 
-    category_name = categorize(txn.description)
-    category = db.query(Category).filter(Category.name == category_name).first()
+    ml_model = MLCategorizer()
+    prediction = ml_model.predict(txn.description)
+
+    if prediction:
+        category_name = prediction.category_name
+        category_source = CategorySource.ML
+    else:
+        category_name = categorize(txn.description)
+        category_source = CategorySource.RULE_BASED
+
+    category = db.query(Category).filter(
+        Category.name == category_name
+    ).first()
 
     txn.category_id = category.id if category else None
-    txn.category_source = CategorySource.RULE_BASED
+    txn.category_source = category_source
     db.commit()
 
     return {"transaction_id": txn.id, "category_name": category_name}
@@ -58,10 +70,42 @@ def train_ml_model(
     current_user: User = Depends(get_current_user),
 ):
     """
-    TODO (Person B, Week 3-4 stretch goal): pull all transactions with
-    category_source == MANUAL_CORRECTION for this user (or across all users,
-    if you want more training data), call MLCategorizer.train() on them,
-    and return how many examples it trained on. See
-    services/categorization/ml_classifier.py for the full plan.
+    Train the ML categorizer using this user's manual corrections.
     """
-    raise HTTPException(status_code=501, detail="ML training not implemented yet")
+
+    transactions = (
+        db.query(Transaction)
+        .filter(
+            Transaction.user_id == current_user.id,
+            Transaction.category_source == CategorySource.MANUAL_CORRECTION,
+            Transaction.category_id.isnot(None),
+        )
+        .all()
+    )
+
+    if len(transactions) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Not enough manual corrections to train the model",
+        )
+
+    descriptions = [txn.description for txn in transactions]
+    category_names = [
+        txn.category.name
+        for txn in transactions
+        if txn.category
+    ]
+
+    if len(descriptions) != len(category_names):
+        raise HTTPException(
+            status_code=400,
+            detail="Some training transactions have missing categories",
+        )
+
+    model = MLCategorizer()
+    model.train(descriptions, category_names)
+
+    return {
+        "message": "ML model trained successfully",
+        "training_examples": len(descriptions),
+    }

@@ -29,7 +29,28 @@ This file currently has the class shape stubbed out. Nothing here runs yet —
 that's the task.
 """
 
+"""
+PERSON B OWNS THIS FILE.
+
+ML-based transaction categorization using TF-IDF + Logistic Regression.
+
+Training data comes from transactions that users manually corrected.
+The trained model and vectorizer are persisted with joblib.
+"""
+
 from dataclasses import dataclass
+from pathlib import Path
+
+import joblib
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+
+
+MODEL_DIR = Path(__file__).resolve().parent
+MODEL_PATH = MODEL_DIR / "ml_model.joblib"
+VECTORIZER_PATH = MODEL_DIR / "tfidf_vectorizer.joblib"
+
+CONFIDENCE_THRESHOLD = 0.5
 
 
 @dataclass
@@ -43,20 +64,85 @@ class MLCategorizer:
         self.model = None
         self.vectorizer = None
 
-    def train(self, descriptions: list[str], category_names: list[str]) -> None:
+        self._load_model()
+
+    def train(
+        self,
+        descriptions: list[str],
+        category_names: list[str],
+    ) -> None:
         """
-        TODO: fit a TfidfVectorizer on `descriptions`, fit a classifier on
-        the vectors against `category_names`, store both on self, and
-        persist them to disk (joblib.dump) so predict() can load them
-        without retraining every time the server restarts.
+        Train the classifier using transaction descriptions and
+        their manually corrected category names.
         """
-        raise NotImplementedError
+
+        if not descriptions or not category_names:
+            raise ValueError("Training data cannot be empty.")
+
+        if len(descriptions) != len(category_names):
+            raise ValueError(
+                "Descriptions and category_names must have the same length."
+            )
+
+        if len(set(category_names)) < 2:
+            raise ValueError(
+                "At least two different categories are required for training."
+            )
+
+        self.vectorizer = TfidfVectorizer(
+            lowercase=True,
+            ngram_range=(1, 2),
+            min_df=1,
+        )
+
+        X = self.vectorizer.fit_transform(descriptions)
+
+        self.model = LogisticRegression(
+            max_iter=1000,
+        )
+
+        self.model.fit(X, category_names)
+
+        joblib.dump(self.model, MODEL_PATH)
+        joblib.dump(self.vectorizer, VECTORIZER_PATH)
 
     def predict(self, description: str) -> Prediction | None:
         """
-        TODO: vectorize `description` with the trained vectorizer, get the
-        model's predicted category and confidence score, and return None
-        if confidence is below your chosen threshold (so the caller falls
-        back to rule-based categorization instead of trusting a bad guess).
+        Predict a category for a transaction description.
+
+        Returns None when the model is not trained or when its
+        confidence is below the configured threshold.
         """
-        raise NotImplementedError
+
+        if not description or not description.strip():
+            return None
+
+        if self.model is None or self.vectorizer is None:
+            self._load_model()
+
+        if self.model is None or self.vectorizer is None:
+            return None
+
+        X = self.vectorizer.transform([description])
+
+        probabilities = self.model.predict_proba(X)[0]
+
+        best_index = probabilities.argmax()
+        confidence = float(probabilities[best_index])
+
+        if confidence < CONFIDENCE_THRESHOLD:
+            return None
+
+        category_name = self.model.classes_[best_index]
+
+        return Prediction(
+            category_name=category_name,
+            confidence=confidence,
+        )
+
+    def _load_model(self) -> None:
+        """Load the persisted model and vectorizer if they exist."""
+
+        if MODEL_PATH.exists() and VECTORIZER_PATH.exists():
+            self.model = joblib.load(MODEL_PATH)
+            self.vectorizer = joblib.load(VECTORIZER_PATH)

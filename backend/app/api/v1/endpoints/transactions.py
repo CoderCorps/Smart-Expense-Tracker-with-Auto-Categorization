@@ -16,6 +16,10 @@ from backend.app.models.category import Category
 from backend.app.models.transaction import CategorySource, Transaction, TransactionType
 from backend.app.models.user import User
 from backend.app.schemas.transaction import TransactionCategoryUpdate, TransactionCreate, TransactionOut
+from backend.app.models.model_training import ModelTrainingState
+from backend.app.services.categorization.ml_classifier import MLCategorizer
+from backend.app.services.categorization.training_data import TRAINING_DATA
+
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -81,7 +85,7 @@ def create_transaction(
         amount=payload.amount,
         type=payload.type,
         category_id=payload.category_id,
-        category_source=CategorySource.MANUAL_CORRECTION if payload.category_id else CategorySource.UNCATEGORIZED,
+        category_source=CategorySource.UNCATEGORIZED,
         source=TransactionSource.MANUAL,
     )
     db.add(transaction)
@@ -108,10 +112,11 @@ def update_transaction_category(
     current_user: User = Depends(get_current_user),
 ):
     """
-    The user correcting a wrong auto-category. This is intentionally its own
-    endpoint (not part of a general PATCH) because every call here is also a
-    labeled training example for Person C's ML classifier — see
-    CategorySource.MANUAL_CORRECTION in app/models/transaction.py.
+    The user correcting a wrong auto-category.
+
+    Every correction is stored as a labeled training example.
+    The ML model is automatically retrained after every 20 new
+    manual corrections.
     """
     txn = _get_owned_transaction(db, transaction_id, current_user)
 
@@ -119,10 +124,79 @@ def update_transaction_category(
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
 
+    # Save the user's correction
     txn.category_id = payload.category_id
     txn.category_source = CategorySource.MANUAL_CORRECTION
+
     db.commit()
     db.refresh(txn)
+
+    # Retrain the model after every 20 new corrections
+    RETRAIN_AFTER = 20
+
+    total_corrections = (
+        db.query(Transaction)
+        .filter(
+            Transaction.category_source == CategorySource.MANUAL_CORRECTION
+        )
+        .count()
+    )
+
+    # Get the training state
+    training_state = db.get(ModelTrainingState, 1)
+
+    # Create the state record if it doesn't exist yet
+    if not training_state:
+        training_state = ModelTrainingState(
+            id=1,
+            trained_correction_count=0,
+        )
+        db.add(training_state)
+        db.commit()
+        db.refresh(training_state)
+
+    new_corrections = (
+        total_corrections
+        - training_state.trained_correction_count
+    )
+
+    # Automatically retrain after 20 new corrections
+    if new_corrections >= RETRAIN_AFTER:
+
+        manual_transactions = (
+            db.query(Transaction)
+            .filter(
+                Transaction.category_source
+                == CategorySource.MANUAL_CORRECTION,
+                Transaction.category_id.isnot(None),
+            )
+            .all()
+        )
+
+        descriptions = []
+        category_names = []
+
+        # Add built-in training examples
+        for category_name, examples in TRAINING_DATA.items():
+            for description in examples:
+                descriptions.append(description)
+                category_names.append(category_name)
+
+        # Add user corrections
+        for corrected_txn in manual_transactions:
+            if corrected_txn.category:
+                descriptions.append(corrected_txn.description)
+                category_names.append(corrected_txn.category.name)
+
+        # Train only if there are at least two categories
+        if len(set(category_names)) >= 2:
+            model = MLCategorizer()
+            model.train(descriptions, category_names)
+
+            # Remember how many corrections were included
+            training_state.trained_correction_count = total_corrections
+            db.commit()
+
     return _to_transaction_out(txn)
 
 

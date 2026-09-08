@@ -5,6 +5,7 @@ from backend.app.api.v1.router import api_router
 from backend.app.core.config import settings
 from backend.app.db.database import Base, SessionLocal, engine
 from backend.app.models.category import DEFAULT_CATEGORIES, Category
+from backend.app.models.model_training import ModelTrainingState
 
 app = FastAPI(title=settings.PROJECT_NAME)
 

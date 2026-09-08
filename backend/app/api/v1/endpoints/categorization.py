@@ -14,6 +14,7 @@ from backend.app.models.transaction import CategorySource, Transaction
 from backend.app.models.user import User
 from backend.app.services.categorization.rule_based import categorize
 from backend.app.services.categorization.ml_classifier import MLCategorizer
+from backend.app.services.categorization.training_data import TRAINING_DATA
 
 router = APIRouter(prefix="/categorization", tags=["categorization"])
 
@@ -70,7 +71,8 @@ def train_ml_model(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Train the ML categorizer using this user's manual corrections.
+    Train the ML categorizer using built-in training examples
+    plus this user's manual corrections.
     """
 
     transactions = (
@@ -83,29 +85,31 @@ def train_ml_model(
         .all()
     )
 
-    if len(transactions) < 2:
+    descriptions = []
+    category_names = []
+
+
+    for category, examples in TRAINING_DATA.items():
+        for description in examples:
+            descriptions.append(description)
+            category_names.append(category)
+
+    # Add user's manual corrections
+    for txn in transactions:
+        if txn.category:
+            descriptions.append(txn.description)
+            category_names.append(txn.category.name)
+
+    if len(set(category_names)) < 2:
         raise HTTPException(
             status_code=400,
-            detail="Not enough manual corrections to train the model",
+            detail="At least two categories are required to train the model",
         )
-
-    descriptions = [txn.description for txn in transactions]
-    category_names = [
-        txn.category.name
-        for txn in transactions
-        if txn.category
-    ]
-
-    if len(descriptions) != len(category_names):
-        raise HTTPException(
-            status_code=400,
-            detail="Some training transactions have missing categories",
-        )
-
     model = MLCategorizer()
     model.train(descriptions, category_names)
 
     return {
         "message": "ML model trained successfully",
         "training_examples": len(descriptions),
+        "manual_corrections": len(transactions),
     }

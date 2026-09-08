@@ -36,15 +36,23 @@ from backend.app.schemas.upload import (
     UploadResult,
 )
 from backend.app.services.categorization.rule_based import categorize
+from backend.app.services.categorization.ml_classifier import MLCategorizer
 from backend.app.services.parsers.column_mapper import suggest_mapping
 from backend.app.services.parsers.csv_parser import parse_csv
 from backend.app.services.parsers.pdf_parser import parse_pdf
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 
-# upload_id -> (DataFrame, original filename). See note in the module
-# docstring above on why this is in-memory.
+# upload_id -> DataFrame. Parsed-but-unconfirmed uploads are kept in memory.
 _preview_store: dict[str, pd.DataFrame] = {}
+
+def categorize_transaction(description: str) -> tuple[str, str]:
+    """Categorize a description, preferring the ML model when confident."""
+    ml_categorizer = MLCategorizer()
+    prediction = ml_categorizer.predict(description)
+    if prediction:
+        return prediction.category_name, "ml"
+    return categorize(description), "rule_based"
 
 
 @router.post("/preview", response_model=ColumnMappingSuggestion)
@@ -105,7 +113,7 @@ def confirm_upload(
     for idx, row in df.iterrows():
         try:
             raw_description = str(row[payload.mapping["description"]])
-            category_name = categorize(raw_description)
+            category_name, category_source = categorize_transaction(raw_description)
 
             type_column = payload.mapping.get("type")
             if type_column and type_column in df.columns:
@@ -124,7 +132,11 @@ def confirm_upload(
                 amount=float(row[payload.mapping["amount"]]),
                 type=txn_type,
                 category_id=categories_by_name.get(category_name),
-                category_source=CategorySource.RULE_BASED,
+                category_source=(
+                    CategorySource.ML
+                    if category_source == "ml"
+                    else CategorySource.RULE_BASED
+                ),
                 source=TransactionSource.CSV,
             )
             db.add(transaction)

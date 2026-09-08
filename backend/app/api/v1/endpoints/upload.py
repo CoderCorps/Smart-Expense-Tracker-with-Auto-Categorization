@@ -44,7 +44,8 @@ from backend.app.services.parsers.pdf_parser import parse_pdf
 router = APIRouter(prefix="/upload", tags=["upload"])
 
 # upload_id -> DataFrame. Parsed-but-unconfirmed uploads are kept in memory.
-_preview_store: dict[str, pd.DataFrame] = {}
+_preview_store: dict[str, tuple[pd.DataFrame, str]] = {}
+
 
 def categorize_transaction(description: str) -> tuple[str, str]:
     """Categorize a description, preferring the ML model when confident."""
@@ -77,7 +78,10 @@ async def preview_upload(
         raise HTTPException(status_code=400, detail="Only .csv and .pdf files are supported")
 
     upload_id = str(uuid.uuid4())
-    _preview_store[upload_id] = df
+    _preview_store[upload_id] = (
+        df,
+        file.filename.lower()
+    )
 
     mapping = suggest_mapping(list(df.columns))
     sample_rows = df.head(5).fillna("").to_dict(orient="records")
@@ -91,15 +95,51 @@ async def preview_upload(
     )
 
 
+def normalize_transaction_type(value: str):
+    value = str(value).strip().lower()
+
+    if value in {
+        "earn",
+        "credit",
+        "cr",
+        "deposit",
+        "salary",
+        "refund",
+        "income",
+        "received",
+    }:
+        return TransactionType.EARN
+
+    if value in {
+        "spend",
+        "debit",
+        "dr",
+        "withdrawal",
+        "transfer",
+        "payment",
+        "purchase",
+        "expense",
+        "withdraw",
+    }:
+        return TransactionType.SPEND
+
+    return None
+
 @router.post("/confirm", response_model=UploadResult)
 def confirm_upload(
     payload: ColumnMappingConfirm,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    df = _preview_store.get(payload.upload_id)
-    if df is None:
-        raise HTTPException(status_code=404, detail="Upload not found or already confirmed")
+    stored = _preview_store.get(payload.upload_id)
+
+    if stored is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Upload not found or already confirmed"
+        )
+
+    df, filename = stored
 
     missing_fields = [f for f in STANDARD_FIELDS if f not in payload.mapping]
     if missing_fields:
@@ -108,6 +148,7 @@ def confirm_upload(
     categories_by_name = {c.name: c.id for c in db.query(Category).all()}
 
     saved_count = 0
+    skipped_count = 0
     errors: list[str] = []
 
     for idx, row in df.iterrows():
@@ -116,20 +157,48 @@ def confirm_upload(
             category_name, category_source = categorize_transaction(raw_description)
 
             type_column = payload.mapping.get("type")
+
+            raw_amount_text = (
+                str(row[payload.mapping["amount"]])
+                .replace(",", "")
+                .replace("$", "")
+                .strip()
+            )
+            # Skip rows with no usable amount, such as Opening Balance
+            if raw_amount_text in {"", "-"}:
+                skipped_count += 1
+                errors.append(f"Row {idx}: no usable amount, skipped")
+                continue
+
+            raw_amount = float(raw_amount_text)
+
             if type_column and type_column in df.columns:
-                txn_type = TransactionType(str(row[type_column]).strip().lower())
+                raw_type = str(row[type_column]).strip().lower()
+
+                txn_type = normalize_transaction_type(raw_type)
+
+                # Skip rows such as Opening Balance where type is "-"
+                if txn_type is None:
+                    skipped_count += 1
+                    errors.append(f"Row {idx}: unrecognized transaction type '{raw_type}', skipped")
+                    continue
+
             else:
-                # No type column mapped — TODO (Person B): infer spend vs earn
-                # from amount sign instead of defaulting everyone to SPEND,
-                # for banks that only give a single signed amount column.
-                txn_type = TransactionType.SPEND
+                if raw_amount < 0:
+                    txn_type = TransactionType.SPEND
+                else:
+                    txn_type = TransactionType.EARN
+
+            amount = abs(raw_amount)
 
             transaction = Transaction(
                 user_id=current_user.id,
-                date=pd.to_datetime(row[payload.mapping["date"]]).date(),
+                date=pd.to_datetime(
+                    row[payload.mapping["date"]]
+                ).date(),
                 description=raw_description,
                 raw_description=raw_description,
-                amount=float(row[payload.mapping["amount"]]),
+                amount=amount,
                 type=txn_type,
                 category_id=categories_by_name.get(category_name),
                 category_source=(
@@ -137,14 +206,21 @@ def confirm_upload(
                     if category_source == "ml"
                     else CategorySource.RULE_BASED
                 ),
-                source=TransactionSource.CSV,
+                source=(
+                    TransactionSource.PDF
+                    if filename.endswith(".pdf")
+                    else TransactionSource.CSV
+                ),
             )
+
             db.add(transaction)
             saved_count += 1
-        except Exception as exc:  # noqa: BLE001 - we want to keep going on bad rows
+
+        except Exception as exc:
+            skipped_count += 1
             errors.append(f"Row {idx}: {exc}")
 
     db.commit()
     del _preview_store[payload.upload_id]
 
-    return UploadResult(saved_count=saved_count, skipped_count=len(errors), errors=errors)
+    return UploadResult(saved_count=saved_count, skipped_count=skipped_count, errors=errors)

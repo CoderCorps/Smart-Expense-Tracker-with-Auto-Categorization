@@ -1,16 +1,15 @@
 """
-PERSON B OWNS THIS FILE (along with ml_classifier.py).
+Keyword-based categorization.
 
-Keyword-based categorization. This is the fallback that always runs first —
-every transaction gets a category the moment it's saved, using this. Once
-ml_classifier.py is trained (see that file), the categorization pipeline in
-upload.py can be switched to try ML first and fall back to this when the ML
-model isn't confident.
+This is the floor: every transaction gets a category the moment it's
+saved, so nothing is ever left uncategorized. The ML classifier in
+ml_classifier.py takes precedence wherever it's confident, and falls back
+here whenever it isn't — see categorize_transaction() in upload.py.
 
-This works fine as a baseline but the keyword list below is intentionally
-small. Expanding it against real transaction descriptions is the actual
-Week 2 task here — test it against messy real-world text ("SWIGGY*ORDER
-99213", "NEFT-HDFC0001-SALARY", "AMZN Mktp IN") not just clean sample data.
+Matching is substring-based and case-insensitive, which is what makes it
+survive real statement text ("SWIGGY*ORDER 99213", "NEFT-HDFC0001-SALARY",
+"AMZN Mktp IN") rather than only clean sample data. Adding keywords is the
+cheapest way to improve categorization; see tests/test_categorization.py.
 """
 
 # category_name -> keywords that, if found (case-insensitive) in the

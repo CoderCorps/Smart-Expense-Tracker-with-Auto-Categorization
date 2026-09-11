@@ -8,11 +8,34 @@ by the current user) and return plain Python structures matching the
 Pydantic schemas.
 """
 
+import re
+from typing import Any, Dict, List, Optional
+
 import pandas as pd
-from typing import List, Dict, Any, Optional
 from dateutil.relativedelta import relativedelta
 
 from backend.app.models.transaction import Transaction, TransactionType
+
+_MONTH_PATTERN = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+
+
+class InvalidMonth(ValueError):
+    """Raised for a month string that isn't YYYY-MM."""
+
+
+def _validate_month(month: str) -> str:
+    """
+    Reject a malformed month before it reaches pandas.
+
+    Without this, "2026-13" or "august" surfaces as a 500 from deep
+    inside to_datetime instead of a 422 naming the bad parameter.
+    """
+
+    if not isinstance(month, str) or not _MONTH_PATTERN.match(month):
+        raise InvalidMonth(f"Expected a month as YYYY-MM, got {month!r}")
+
+    return month
+
 
 def _transactions_to_df(transactions: List[Transaction]) -> pd.DataFrame:
     """
@@ -38,7 +61,7 @@ def _transactions_to_df(transactions: List[Transaction]) -> pd.DataFrame:
 
 def _filter_month(df: pd.DataFrame, month_str: str) -> pd.DataFrame:
     """Filter DataFrame to rows whose date falls in the given month YYYY-MM."""
-    start = pd.to_datetime(f"{month_str}-01")
+    start = pd.to_datetime(f"{_validate_month(month_str)}-01")
     next_month = start + pd.offsets.MonthBegin(1)
     return df[(df["date"] >= start) & (df["date"] < next_month)]
 
@@ -81,6 +104,8 @@ def get_monthly_summary(transactions: List[Transaction], month: str) -> Dict[str
             "month": str
         }
     """
+    _validate_month(month)
+
     df = _transactions_to_df(transactions)
     if df.empty:
         return {
@@ -238,7 +263,7 @@ def detect_spikes(transactions: List[Transaction], threshold_multiplier: float =
     if df.empty:
         return []
 
-    df_spend = df[df["type"] == TransactionType.SPEND.value]
+    df_spend = df[df["type"] == TransactionType.SPEND.value].copy()
     if df_spend.empty:
         return []
 
@@ -266,13 +291,11 @@ def detect_spikes(transactions: List[Transaction], threshold_multiplier: float =
         pivot.loc[m] = 0
     pivot = pivot.sort_index()
 
-    # Check that we actually have all previous months (after filling, they exist)
-    # But if the user has no data at all for those months, we filled zeros,
-    # which is fine. However, the project says to handle insufficient history gracefully.
-    # We require that at least one previous month exists with some data? Actually the requirement says
-    # missing months should be treated as zero, but there should still be a meaningful average.
-    # If there are zero transactions in all previous months for a category, the average will be zero,
-    # which we skip.
+    # A month with no spending in a category counts as a zero, not as a
+    # gap — otherwise a category bought in one month out of three looks
+    # like it has a high "average" built from a single data point. A
+    # category with no history at all averages zero and is skipped below,
+    # since a first-ever purchase isn't a spike.
 
     if current_month_str not in pivot.index:
         return []  # no current month? shouldn't happen
@@ -306,98 +329,3 @@ def detect_spikes(transactions: List[Transaction], threshold_multiplier: float =
 
     alerts.sort(key=lambda x: x["current_amount"], reverse=True)
     return alerts
-
-
-# ---------- Demo / Test Section ----------
-if __name__ == "__main__":
-    from datetime import date
-
-    class DummyCategory:
-        def __init__(self, name):
-            self.name = name
-
-    test_transactions = []
-    # May 2026
-    test_transactions.append(
-        Transaction(
-            id=1, user_id=1, date=date(2026, 5, 10), description="Food", raw_description=None,
-            amount=100.0, type=TransactionType.SPEND, category=DummyCategory("Food & Dining"),
-            category_source=None, source=None, created_at=None
-        )
-    )
-    test_transactions.append(
-        Transaction(
-            id=2, user_id=1, date=date(2026, 5, 15), description="Shopping", raw_description=None,
-            amount=200.0, type=TransactionType.SPEND, category=DummyCategory("Shopping"),
-            category_source=None, source=None, created_at=None
-        )
-    )
-    # June 2026
-    test_transactions.append(
-        Transaction(
-            id=3, user_id=1, date=date(2026, 6, 5), description="Food", raw_description=None,
-            amount=120.0, type=TransactionType.SPEND, category=DummyCategory("Food & Dining"),
-            category_source=None, source=None, created_at=None
-        )
-    )
-    test_transactions.append(
-        Transaction(
-            id=4, user_id=1, date=date(2026, 6, 20), description="Shopping", raw_description=None,
-            amount=220.0, type=TransactionType.SPEND, category=DummyCategory("Shopping"),
-            category_source=None, source=None, created_at=None
-        )
-    )
-    # July 2026
-    test_transactions.append(
-        Transaction(
-            id=5, user_id=1, date=date(2026, 7, 8), description="Food", raw_description=None,
-            amount=110.0, type=TransactionType.SPEND, category=DummyCategory("Food & Dining"),
-            category_source=None, source=None, created_at=None
-        )
-    )
-    test_transactions.append(
-        Transaction(
-            id=6, user_id=1, date=date(2026, 7, 25), description="Shopping", raw_description=None,
-            amount=210.0, type=TransactionType.SPEND, category=DummyCategory("Shopping"),
-            category_source=None, source=None, created_at=None
-        )
-    )
-    # August 2026
-    test_transactions.append(
-        Transaction(
-            id=7, user_id=1, date=date(2026, 8, 2), description="Food", raw_description=None,
-            amount=300.0, type=TransactionType.SPEND, category=DummyCategory("Food & Dining"),
-            category_source=None, source=None, created_at=None
-        )
-    )
-    test_transactions.append(
-        Transaction(
-            id=8, user_id=1, date=date(2026, 8, 15), description="Shopping", raw_description=None,
-            amount=230.0, type=TransactionType.SPEND, category=DummyCategory("Shopping"),
-            category_source=None, source=None, created_at=None
-        )
-    )
-    test_transactions.append(
-        Transaction(
-            id=9, user_id=1, date=date(2026, 8, 20), description="Salary", raw_description=None,
-            amount=5000.0, type=TransactionType.EARN, category=DummyCategory("Salary & Income"),
-            category_source=None, source=None, created_at=None
-        )
-    )
-
-    print("=== Monthly Summary for 2026-08 ===")
-    print(get_monthly_summary(test_transactions, "2026-08"))
-
-    print("\n=== Category Breakdown for 2026-08 ===")
-    print(get_category_breakdown(test_transactions, "2026-08"))
-
-    print("\n=== Trend (Monthly) ===")
-    print(get_trend(test_transactions, "monthly"))
-
-    print("\n=== Trend (Daily) ===")
-    print(get_trend(test_transactions, "daily"))
-
-    print("\n=== Spike Detection ===")
-    spikes = detect_spikes(test_transactions, threshold_multiplier=1.5)
-    for alert in spikes:
-        print(alert)

@@ -11,7 +11,7 @@ export function StatCard({
   tone?: 'default' | 'good' | 'bad'
 }) {
   const toneClass =
-    tone === 'good' ? 'text-[var(--success-text)]' : tone === 'bad' ? 'text-status-critical' : 'text-text-primary'
+    tone === 'good' ? 'text-(--success-text)' : tone === 'bad' ? 'text-status-critical' : 'text-text-primary'
 
   return (
     <Card>

@@ -133,8 +133,8 @@ def auth_headers_user_2(client: TestClient, test_user_2: User) -> dict:
 @pytest.fixture
 def seed_categories(db: Session):
     """Seed the database with default categories."""
-    for name in DEFAULT_CATEGORIES:
-        category = Category(name=name, is_default=True)
+    for name, description in DEFAULT_CATEGORIES.items():
+        category = Category(name=name, description=description, is_default=True)
         db.add(category)
     db.commit()
     return db.query(Category).all()

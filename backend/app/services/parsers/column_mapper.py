@@ -1,21 +1,16 @@
 """
-PERSON A OWNS THIS FILE.
-
 Guesses which raw column in an uploaded file corresponds to each of our
 standard fields (date, description, amount, type). This is what lets a
 user upload literally any bank's CSV export without us hardcoding column
 names — different banks call things differently ("Txn Date" vs "Date"
 vs "Value Date", "Narration" vs "Description" vs "Particulars", etc).
 
-A basic version is implemented below using simple alias matching. It will
-work fine for the sample data and most common bank exports. Ways to make
-it meaningfully better (pick one or more as time allows):
-  - Add more aliases as you test against real bank statement exports
-  - Use difflib.get_close_matches() for fuzzy matching instead of exact
-    alias lookup, to catch near-misses like "Trans_Date"
-  - Detect the `type` field even when it's not a separate column — some
-    banks put spend as negative numbers and earn as positive in a single
-    "amount" column instead of a separate type column. Worth handling.
+Alias matching, deliberately simple: a wrong guess costs nothing because
+the user confirms the mapping in the preview step before anything is
+saved. Add aliases here as new bank exports turn up.
+
+A missing `type` column is already handled downstream — upload.py falls
+back to the sign of the amount when no type column is mapped.
 """
 
 from typing import Optional

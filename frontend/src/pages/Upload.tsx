@@ -64,7 +64,10 @@ export function Upload() {
     <div className="flex max-w-2xl flex-col gap-5">
       <div>
         <h1 className="text-xl">Upload transactions</h1>
-        <p className="text-sm text-text-muted">Import a CSV or PDF statement — PDF parsing is still a work in progress.</p>
+        <p className="text-sm text-text-muted">
+          Import a CSV or PDF bank statement. You'll confirm the column mapping before anything is
+          saved.
+        </p>
       </div>
 
       {error && <ErrorBanner message={error} />}
@@ -81,7 +84,9 @@ export function Upload() {
             <span className="text-sm font-medium text-text-primary">
               {loading ? 'Reading file…' : 'Click to choose a .csv or .pdf file'}
             </span>
-            <span className="text-xs text-text-muted">We'll show you a preview before saving anything</span>
+            <span className="text-xs text-text-muted">
+              Up to 10MB. We'll show you a preview before saving anything.
+            </span>
           </label>
           <input
             id="file"
@@ -173,7 +178,10 @@ export function Upload() {
           <h3 className="text-sm">Import complete</h3>
           <p className="mt-2 text-2xl font-semibold text-text-primary">{result.saved_count} saved</p>
           {result.skipped_count > 0 && (
-            <p className="mt-1 text-sm text-status-critical">{result.skipped_count} rows skipped</p>
+            <p className="mt-1 text-sm text-text-secondary">
+              {result.skipped_count} row{result.skipped_count === 1 ? '' : 's'} skipped — usually
+              opening-balance or subtotal lines with no amount.
+            </p>
           )}
           {result.errors.length > 0 && (
             <ul className="mt-3 max-h-40 overflow-y-auto rounded-lg bg-surface-3 p-3 text-xs text-text-muted">

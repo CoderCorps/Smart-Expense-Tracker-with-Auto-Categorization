@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { apiErrorMessage } from '../../lib/api'
 import { transactionsApi } from '../../lib/resources'
 import type { Category, TransactionType } from '../../lib/types'
@@ -20,6 +20,14 @@ export function AddTransactionModal({
   const [categoryId, setCategoryId] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -44,10 +52,15 @@ export function AddTransactionModal({
   return (
     <div className="fixed inset-0 z-10 grid place-items-center bg-black/40 px-4" onClick={onClose}>
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-transaction-title"
         className="w-full max-w-md rounded-xl border border-border bg-surface-1 p-5 shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-lg">Add transaction</h2>
+        <h2 id="add-transaction-title" className="text-lg">
+          Add transaction
+        </h2>
         <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-3">
           {error && <ErrorBanner message={error} />}
 
@@ -63,7 +76,15 @@ export function AddTransactionModal({
             </div>
             <div>
               <Label>Amount</Label>
-              <Input type="number" step="0.01" min="0" required value={amount} onChange={(e) => setAmount(e.target.value)} />
+              {/* The API rejects a zero amount; catch it in the browser first. */}
+              <Input
+                type="number"
+                step="0.01"
+                min="0.01"
+                required
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+              />
             </div>
           </div>
 

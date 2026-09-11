@@ -74,11 +74,45 @@ export function EmptyState({ title, hint }: { title: string; hint?: string }) {
   )
 }
 
+/**
+ * Placeholder block shown while a panel's data is loading.
+ *
+ * Sized to roughly match what replaces it, so the layout doesn't jump
+ * when the real content arrives.
+ */
+export function Skeleton({ className = '' }: { className?: string }) {
+  return (
+    <div
+      aria-hidden
+      className={`animate-pulse rounded-md bg-surface-3 ${className}`}
+    />
+  )
+}
+
+/**
+ * A panel that failed to load, with a way to try again. Distinct from
+ * EmptyState: "nothing here" and "we couldn't fetch it" are different
+ * things and shouldn't look alike.
+ */
+export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border py-10 text-center">
+      <p className="text-sm font-medium text-text-primary">Couldn't load this</p>
+      <p className="max-w-xs text-xs text-text-muted">{message}</p>
+      {onRetry && (
+        <Button variant="secondary" className="mt-1" onClick={onRetry}>
+          Try again
+        </Button>
+      )}
+    </div>
+  )
+}
+
 export function Badge({ children, tone = 'default' }: { children: ReactNode; tone?: 'default' | 'good' | 'warning' }) {
   const tones: Record<string, string> = {
     default: 'bg-surface-3 text-text-secondary',
     good: 'bg-status-good/15 text-status-good',
-    warning: 'bg-status-warning/20 text-[#8a5a00]',
+    warning: 'bg-status-warning/20 text-[#8a5a00] dark:text-status-warning',
   }
   return (
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${tones[tone]}`}>

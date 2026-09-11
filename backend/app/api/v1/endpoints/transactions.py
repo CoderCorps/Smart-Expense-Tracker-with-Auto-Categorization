@@ -8,12 +8,17 @@ for an example) rather than calling these HTTP endpoints internally.
 
 from datetime import date as date_type
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy.orm import Session, joinedload
 
 from backend.app.api.deps import get_current_user, get_db
 from backend.app.models.category import Category
-from backend.app.models.transaction import CategorySource, Transaction, TransactionType
+from backend.app.models.transaction import (
+    CategorySource,
+    Transaction,
+    TransactionSource,
+    TransactionType,
+)
 from backend.app.models.user import User
 from backend.app.schemas.transaction import TransactionCategoryUpdate, TransactionCreate, TransactionOut
 
@@ -25,6 +30,7 @@ def _to_transaction_out(txn: Transaction) -> TransactionOut:
         id=txn.id,
         date=txn.date,
         description=txn.description,
+        raw_description=txn.raw_description,
         amount=txn.amount,
         type=txn.type,
         category_id=txn.category_id,
@@ -36,6 +42,7 @@ def _to_transaction_out(txn: Transaction) -> TransactionOut:
 
 @router.get("", response_model=list[TransactionOut])
 def list_transactions(
+    response: Response,
     start_date: date_type | None = None,
     end_date: date_type | None = None,
     category_id: int | None = None,
@@ -46,7 +53,18 @@ def list_transactions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = db.query(Transaction).filter(Transaction.user_id == current_user.id)
+    """
+    Filtered, paginated list for the current user.
+
+    The total number of matching rows (ignoring pagination) is returned in
+    the `X-Total-Count` header so the frontend can render real page counts
+    without changing this endpoint's array response shape.
+    """
+    query = (
+        db.query(Transaction)
+        .options(joinedload(Transaction.category))
+        .filter(Transaction.user_id == current_user.id)
+    )
 
     if start_date:
         query = query.filter(Transaction.date >= start_date)
@@ -59,7 +77,11 @@ def list_transactions(
     if search:
         query = query.filter(Transaction.description.ilike(f"%{search}%"))
 
-    query = query.order_by(Transaction.date.desc())
+    response.headers["X-Total-Count"] = str(query.count())
+
+    # id is the tiebreaker: without it, rows sharing a date can shuffle
+    # between pages and the same transaction shows up twice (or never).
+    query = query.order_by(Transaction.date.desc(), Transaction.id.desc())
     query = query.offset((page - 1) * page_size).limit(page_size)
 
     return [_to_transaction_out(t) for t in query.all()]
@@ -71,7 +93,16 @@ def create_transaction(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    from backend.app.models.transaction import TransactionSource
+    """
+    Manual entry. `description` arrives already cleaned and `amount` already
+    positive — TransactionCreate's validators enforce that, so the same
+    invariants hold here as on the CSV/PDF import path in upload.py.
+
+    There's no external source text for a typed-in transaction, so
+    raw_description mirrors the description the user entered.
+    """
+    if payload.category_id is not None and not db.get(Category, payload.category_id):
+        raise HTTPException(status_code=404, detail="Category not found")
 
     transaction = Transaction(
         user_id=current_user.id,
@@ -81,7 +112,9 @@ def create_transaction(
         amount=payload.amount,
         type=payload.type,
         category_id=payload.category_id,
-        category_source=CategorySource.MANUAL_CORRECTION if payload.category_id else CategorySource.UNCATEGORIZED,
+        category_source=(
+            CategorySource.MANUAL_CORRECTION if payload.category_id else CategorySource.UNCATEGORIZED
+        ),
         source=TransactionSource.MANUAL,
     )
     db.add(transaction)
@@ -110,7 +143,7 @@ def update_transaction_category(
     """
     The user correcting a wrong auto-category. This is intentionally its own
     endpoint (not part of a general PATCH) because every call here is also a
-    labeled training example for Person C's ML classifier — see
+    labeled training example for the ML classifier — see
     CategorySource.MANUAL_CORRECTION in app/models/transaction.py.
     """
     txn = _get_owned_transaction(db, transaction_id, current_user)

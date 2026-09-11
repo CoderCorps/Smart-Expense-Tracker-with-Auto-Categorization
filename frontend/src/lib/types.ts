@@ -15,6 +15,8 @@ export interface Transaction {
   id: number
   date: string
   description: string
+  /** Original source text, before cleaning. Null for older rows. */
+  raw_description: string | null
   amount: number
   type: TransactionType
   category_id: number | null
@@ -26,6 +28,7 @@ export interface Transaction {
 export interface TransactionCreate {
   date: string
   description: string
+  /** Always positive — the backend stores magnitude and uses `type` for direction. */
   amount: number
   type: TransactionType
   category_id: number | null
@@ -44,6 +47,28 @@ export interface TransactionFilters {
 export interface Category {
   id: number
   name: string
+  description: string | null
+}
+
+/**
+ * Progress towards a trained ML categorizer, from
+ * GET /categorization/training-status and POST /categorization/train.
+ */
+export interface TrainingResult {
+  message: string
+  training_examples: number
+  categories_covered: number
+  is_trained: boolean
+  minimum_examples: number | null
+}
+
+/**
+ * A page of results plus the total row count, which the API returns in
+ * the X-Total-Count header rather than wrapping the array.
+ */
+export interface Paginated<T> {
+  items: T[]
+  total: number
 }
 
 export interface DashboardSummary {

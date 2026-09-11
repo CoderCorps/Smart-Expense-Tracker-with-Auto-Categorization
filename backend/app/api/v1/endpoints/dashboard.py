@@ -1,19 +1,20 @@
 """
-PERSON C OWNS THIS FILE. Keep it thin — the actual pandas aggregation logic
-lives in services/analytics/aggregations.py, this file just fetches the
-current user's transactions from the DB and hands them to those functions.
+Dashboard analytics over HTTP.
+
+Kept thin — the pandas aggregation logic lives in
+services/analytics/aggregations.py; this file fetches the current user's
+transactions and hands them to those functions.
 """
 
-from datetime import date
-
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session, joinedload
 
 from backend.app.api.deps import get_current_user, get_db
 from backend.app.models.transaction import Transaction
 from backend.app.models.user import User
 from backend.app.schemas.dashboard import CategoryBreakdownItem, DashboardSummary, InsightAlert, TrendPoint
 from backend.app.services.analytics.aggregations import (
+    InvalidMonth,
     detect_spikes,
     get_category_breakdown,
     get_monthly_summary,
@@ -24,7 +25,20 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 
 def _user_transactions(db: Session, user: User) -> list[Transaction]:
-    return db.query(Transaction).filter(Transaction.user_id == user.id).all()
+    """
+    Every transaction for this user.
+
+    The aggregations work over the full history — a month-over-month
+    average needs the months either side of the one being shown — so
+    there's nothing to filter here. joinedload avoids a category query
+    per transaction while building the DataFrame.
+    """
+    return (
+        db.query(Transaction)
+        .options(joinedload(Transaction.category))
+        .filter(Transaction.user_id == user.id)
+        .all()
+    )
 
 
 @router.get("/summary", response_model=DashboardSummary)
@@ -34,7 +48,12 @@ def dashboard_summary(
     current_user: User = Depends(get_current_user),
 ):
     transactions = _user_transactions(db, current_user)
-    result = get_monthly_summary(transactions, month)
+
+    try:
+        result = get_monthly_summary(transactions, month)
+    except InvalidMonth as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     return DashboardSummary(**result)
 
 
@@ -45,7 +64,12 @@ def category_breakdown(
     current_user: User = Depends(get_current_user),
 ):
     transactions = _user_transactions(db, current_user)
-    results = get_category_breakdown(transactions, month)
+
+    try:
+        results = get_category_breakdown(transactions, month)
+    except InvalidMonth as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     return [CategoryBreakdownItem(**r) for r in results]
 
 

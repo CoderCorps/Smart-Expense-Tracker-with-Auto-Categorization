@@ -5,9 +5,11 @@ import type {
   ColumnMappingSuggestion,
   DashboardSummary,
   InsightAlert,
+  Paginated,
   Transaction,
   TransactionCreate,
   TransactionFilters,
+  TrainingResult,
   TrendPoint,
   UploadResult,
   User,
@@ -42,9 +44,12 @@ export const authApi = {
 }
 
 export const transactionsApi = {
-  async list(filters: TransactionFilters) {
-    const { data } = await api.get<Transaction[]>('/transactions', { params: filters })
-    return data
+  async list(filters: TransactionFilters): Promise<Paginated<Transaction>> {
+    const response = await api.get<Transaction[]>('/transactions', { params: filters })
+    // The total ignores pagination and comes back as a header, so the
+    // endpoint can keep returning a plain array. See list_transactions.
+    const total = Number(response.headers['x-total-count'] ?? response.data.length)
+    return { items: response.data, total }
   },
 
   async create(payload: TransactionCreate) {
@@ -67,6 +72,25 @@ export const transactionsApi = {
 export const categoriesApi = {
   async list() {
     const { data } = await api.get<Category[]>('/categorization/categories')
+    return data
+  },
+}
+
+export const categorizationApi = {
+  async trainingStatus() {
+    const { data } = await api.get<TrainingResult>('/categorization/training-status')
+    return data
+  },
+
+  async train() {
+    const { data } = await api.post<TrainingResult>('/categorization/train')
+    return data
+  },
+
+  async recategorize(transactionId: number) {
+    const { data } = await api.post<{ transaction_id: number; category_name: string }>(
+      `/categorization/recategorize/${transactionId}`,
+    )
     return data
   },
 }

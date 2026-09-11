@@ -1,41 +1,30 @@
 """
-PERSON B OWNS THIS FILE. This is the "wow" feature — genuinely optional for
-a working demo (rule_based.py alone is enough to ship), but this is the
-single most portfolio-worthy piece of the whole project if you get to it.
-See the workflow doc for suggested timing (Week 3-4, after core CRUD works).
+ML-based transaction categorization: TF-IDF + logistic regression.
 
-THE IDEA:
+THE IDEA
 Every time a user corrects a wrong auto-category (PUT /transactions/{id}),
-we save that as CategorySource.MANUAL_CORRECTION in the database — that's
-a labeled training example, for free, with zero extra data collection work.
-Once there are enough of them (a few hundred, realistically), train a small
-text classifier on them and use it instead of the keyword rules.
+that correction is saved as CategorySource.MANUAL_CORRECTION — a labeled
+training example, for free, with zero extra data collection. Once there
+are enough of them, train a small text classifier on them and use it in
+preference to the keyword rules in rule_based.py.
 
-SUGGESTED APPROACH (simple, appropriate for this project's size):
-  1. Pull all transactions where category_source == MANUAL_CORRECTION
-  2. Vectorize the `description` text with TF-IDF (sklearn's TfidfVectorizer)
-  3. Train a Multinomial Naive Bayes or Logistic Regression classifier on
-     (vectorized description -> category_id). Both are fast to train, work
-     well on small text datasets, and are easy to explain in an interview —
-     don't reach for a deep learning model here, it's the wrong tool for
-     this amount of data.
-  4. Save the trained model + vectorizer to disk with joblib so you don't
-     retrain on every API call
-  5. In predict(), if the model's confidence for its top prediction is
-     below some threshold (e.g. 0.5), return None so the caller falls back
-     to rule_based.categorize() instead of guessing badly
+Deep learning is the wrong tool at this data size. TF-IDF over word and
+bigram features, fed to logistic regression, trains in milliseconds on a
+few hundred rows and can be explained in an interview.
 
-This file currently has the class shape stubbed out. Nothing here runs yet —
-that's the task.
-"""
+ONE MODEL PER USER
+Models are keyed by user id and live in a directory outside the package
+(see settings.ML_MODEL_DIR). Two reasons:
 
-"""
-PERSON B OWNS THIS FILE.
+  * Correctness. "AMZN MKTP" means Shopping to one user and Groceries to
+    another. A single shared model trained on whoever happened to click
+    first gives everyone else that person's answers.
+  * Privacy. Descriptions are the training data, and they're some of the
+    most sensitive text in the app. They shouldn't cross accounts.
 
-ML-based transaction categorization using TF-IDF + Logistic Regression.
-
-Training data comes from transactions that users manually corrected.
-The trained model and vectorizer are persisted with joblib.
+A model is only consulted for the user it was trained for, and only when
+it's confident enough to beat the rules — see MIN_CHANCE_MULTIPLE below.
+Otherwise predict() returns None and the caller falls back to keywords.
 """
 
 from dataclasses import dataclass
@@ -45,12 +34,34 @@ import joblib
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 
+from backend.app.core.config import settings
 
-MODEL_DIR = Path(__file__).resolve().parent
-MODEL_PATH = MODEL_DIR / "ml_model.joblib"
-VECTORIZER_PATH = MODEL_DIR / "tfidf_vectorizer.joblib"
+# When to trust the model over the keyword rules.
+#
+# A fixed probability threshold doesn't work here, because what counts as
+# confident depends on how many categories the model knows. With four
+# categories a coin-flip is 0.25, and a correct, well-separated prediction
+# lands around 0.36-0.42 — so a flat 0.5 bar rejects every good answer and
+# the model never fires. With nine categories chance is 0.11 and the same
+# bar is even further out of reach.
+#
+# So the test is relative to chance, plus a margin over the runner-up.
+# Measured on a 12-example model: correct predictions clear both easily,
+# while an unrecognisable description sits exactly at chance with a ratio
+# of 1.0 and is correctly refused.
+MIN_CHANCE_MULTIPLE = 1.3
+MIN_MARGIN_RATIO = 1.25
 
-CONFIDENCE_THRESHOLD = 0.5
+# A model trained on a handful of corrections is worse than the keyword
+# rules, and worse in a way that's hard to notice: it's confidently wrong
+# on everything it hasn't seen. Refuse to train until there's enough to
+# learn from.
+MIN_TRAINING_EXAMPLES = 10
+MIN_TRAINING_CATEGORIES = 2
+
+
+class NotEnoughTrainingData(Exception):
+    """Raised when the corrections on file can't support a useful model."""
 
 
 @dataclass
@@ -59,90 +70,152 @@ class Prediction:
     confidence: float
 
 
+def _model_path(user_id: int) -> Path:
+    directory = Path(settings.ML_MODEL_DIR)
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / f"user_{user_id}.joblib"
+
+
 class MLCategorizer:
-    def __init__(self):
-        self.model = None
-        self.vectorizer = None
+    """
+    The categorizer for one user's transactions.
 
-        self._load_model()
+    Construct it per request. Loading is a single joblib read of a model
+    measured in kilobytes, and holding one in a module global is how a
+    freshly trained model ends up ignored until the server restarts.
+    """
 
-    def train(
-        self,
-        descriptions: list[str],
-        category_names: list[str],
-    ) -> None:
+    def __init__(self, user_id: int):
+        self.user_id = user_id
+        self.model: LogisticRegression | None = None
+        self.vectorizer: TfidfVectorizer | None = None
+
+        self._load()
+
+    # -----------------------------------------------------
+    # Training
+    # -----------------------------------------------------
+
+    def train(self, descriptions: list[str], category_names: list[str]) -> int:
         """
-        Train the classifier using transaction descriptions and
-        their manually corrected category names.
-        """
+        Fit and persist a model from this user's manual corrections.
 
-        if not descriptions or not category_names:
-            raise ValueError("Training data cannot be empty.")
+        Returns the number of examples trained on.
+
+        Raises:
+            NotEnoughTrainingData: too few examples, or too few distinct
+                categories for a classifier to be meaningful.
+        """
 
         if len(descriptions) != len(category_names):
-            raise ValueError(
-                "Descriptions and category_names must have the same length."
+            raise ValueError("descriptions and category_names must be the same length")
+
+        if len(descriptions) < MIN_TRAINING_EXAMPLES:
+            raise NotEnoughTrainingData(
+                f"Need at least {MIN_TRAINING_EXAMPLES} corrected transactions "
+                f"to train, but only {len(descriptions)} are available. Correct "
+                f"a few more categories and try again."
             )
 
-        if len(set(category_names)) < 2:
-            raise ValueError(
-                "At least two different categories are required for training."
+        if len(set(category_names)) < MIN_TRAINING_CATEGORIES:
+            raise NotEnoughTrainingData(
+                "Corrections must span at least "
+                f"{MIN_TRAINING_CATEGORIES} different categories to train."
             )
 
-        self.vectorizer = TfidfVectorizer(
+        vectorizer = TfidfVectorizer(
             lowercase=True,
+            # Bigrams catch merchant names that only mean something as a
+            # pair, like "prime video" or "salary credit".
             ngram_range=(1, 2),
             min_df=1,
         )
 
-        X = self.vectorizer.fit_transform(descriptions)
+        features = vectorizer.fit_transform(descriptions)
 
-        self.model = LogisticRegression(
-            max_iter=1000,
+        model = LogisticRegression(max_iter=1000)
+        model.fit(features, category_names)
+
+        joblib.dump(
+            {"model": model, "vectorizer": vectorizer},
+            _model_path(self.user_id),
         )
 
-        self.model.fit(X, category_names)
+        self.model = model
+        self.vectorizer = vectorizer
 
-        joblib.dump(self.model, MODEL_PATH)
-        joblib.dump(self.vectorizer, VECTORIZER_PATH)
+        return len(descriptions)
+
+    # -----------------------------------------------------
+    # Prediction
+    # -----------------------------------------------------
 
     def predict(self, description: str) -> Prediction | None:
         """
-        Predict a category for a transaction description.
+        Predict a category for a description.
 
-        Returns None when the model is not trained or when its
-        confidence is below the configured threshold.
+        Returns None when this user has no trained model, or when the
+        model isn't confident enough to beat the keyword rules — see
+        MIN_CHANCE_MULTIPLE for what "confident enough" means and why it
+        isn't a fixed number.
         """
 
         if not description or not description.strip():
             return None
 
         if self.model is None or self.vectorizer is None:
-            self._load_model()
-
-        if self.model is None or self.vectorizer is None:
             return None
 
-        X = self.vectorizer.transform([description])
+        probabilities = self.model.predict_proba(
+            self.vectorizer.transform([description])
+        )[0]
 
-        probabilities = self.model.predict_proba(X)[0]
-
-        best_index = probabilities.argmax()
-        confidence = float(probabilities[best_index])
-
-        if confidence < CONFIDENCE_THRESHOLD:
+        if len(probabilities) < 2:
             return None
 
-        category_name = self.model.classes_[best_index]
+        ranked = sorted(probabilities, reverse=True)
+        best, runner_up = float(ranked[0]), float(ranked[1])
+
+        chance = 1.0 / len(probabilities)
+
+        if best < chance * MIN_CHANCE_MULTIPLE:
+            return None
+
+        # A clear winner, not a near-tie between two plausible categories.
+        if runner_up > 0 and best / runner_up < MIN_MARGIN_RATIO:
+            return None
+
+        best_index = int(probabilities.argmax())
+        confidence = best
 
         return Prediction(
-            category_name=category_name,
+            # classes_ holds numpy strings; str() keeps what leaves this
+            # module comparable to the category names in the database.
+            category_name=str(self.model.classes_[best_index]),
             confidence=confidence,
         )
 
-    def _load_model(self) -> None:
-        """Load the persisted model and vectorizer if they exist."""
+    @property
+    def is_trained(self) -> bool:
+        return self.model is not None and self.vectorizer is not None
 
-        if MODEL_PATH.exists() and VECTORIZER_PATH.exists():
-            self.model = joblib.load(MODEL_PATH)
-            self.vectorizer = joblib.load(VECTORIZER_PATH)
+    # -----------------------------------------------------
+    # Persistence
+    # -----------------------------------------------------
+
+    def _load(self) -> None:
+        path = _model_path(self.user_id)
+
+        if not path.exists():
+            return
+
+        try:
+            payload = joblib.load(path)
+            self.model = payload["model"]
+            self.vectorizer = payload["vectorizer"]
+        except Exception:
+            # A model written by an older version, or a half-written file.
+            # Falling back to the keyword rules is always safe, so treat
+            # an unreadable model as no model.
+            self.model = None
+            self.vectorizer = None

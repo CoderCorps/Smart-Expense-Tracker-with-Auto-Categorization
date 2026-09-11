@@ -20,8 +20,8 @@ class TransactionSource(str, enum.Enum):
 
 class CategorySource(str, enum.Enum):
     """
-    How this transaction got its category. This matters a lot for Person B's
-    ML work in Week 3-4: every row where category_source == 'manual_correction'
+    How this transaction got its category. This is what makes the ML
+    classifier possible: every row where category_source == 'manual_correction'
     is a labeled training example — the user told us the auto-categorizer
     was wrong and what the right answer was. That's the training set.
     """

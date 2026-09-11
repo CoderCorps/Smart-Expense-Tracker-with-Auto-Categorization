@@ -4,6 +4,9 @@ __pycache__/
 *.db
 .env
 .venv/
-CLAUDE.md
 .claude/
 .pytest_cache/
+
+# Trained ML categorization models (see backend/app/core/config.py)
+ml_models/
+*.joblib
